@@ -6,6 +6,6 @@ venv/
 *.pyo
 *.pyd
 
-models/*.pth
+backend/models/*.pth
 
 .env

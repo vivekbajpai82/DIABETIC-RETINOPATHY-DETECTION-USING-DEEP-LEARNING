@@ -27,7 +27,7 @@ async def check_quality_route(file: UploadFile = File(...)):
         image = Image.open(io.BytesIO(contents))
         
         # TUMHARI FILE KA FUNCTION YAHAN CALL HOGA
-        result = tumhara_function_name(image) 
+        result = check_image_quality(image)
         
         return result
     except Exception as e:

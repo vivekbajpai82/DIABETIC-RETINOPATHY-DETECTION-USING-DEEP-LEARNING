@@ -1,7 +1,8 @@
 import torch, os, gc, requests, io
+import numpy as np
 import torch.nn as nn
 from torchvision import transforms, models
-from PIL import Image
+from PIL import Image, ImageStat
 from huggingface_hub import hf_hub_download
 
 # --- CONFIG ---
@@ -16,9 +17,46 @@ transform_p1 = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
+# --- QUALITY CHECKER ---
+def evaluate_image_quality(image: Image.Image):
+    try:
+        # Image ko B&W mein convert karke brightness/contrast nikalna
+        gray = image.convert("L")
+        stat = ImageStat.Stat(gray)
+        
+        brightness = stat.mean[0]
+        contrast = stat.stddev[0]
+        
+        score = 100
+        
+        # Dark ya Overexposed check
+        if brightness < 30:
+            score -= 35  
+        elif brightness > 200:
+            score -= 30  
+            
+        # Contrast/Blur check
+        if contrast < 20:
+            score -= 40
+            
+        score = max(10, min(100, int(score)))
+        
+        return {
+            "quality_score": score,
+            "is_good": score >= 60,
+            "details": {
+                "brightness": round(brightness, 2),
+                "contrast": round(contrast, 2)
+            }
+        }
+    except Exception as e:
+        print(f"Quality Check Error: {e}")
+        return {"quality_score": 50, "is_good": False, "error": "Could not analyze quality"}
+
+# --- PHASE 1 LOADER ---
 def load_phase1():
     try:
-        # THE MASTER FIX: repo_type="dataset"
+        # MASTER FIX: repo_type="dataset"
         model_path = hf_hub_download(
             repo_id=REPO_ID,
             filename="phase_1.pth",
@@ -39,6 +77,7 @@ def load_phase1():
         print(f"❌ Error downloading/loading Phase 1: {e}")
         return None
 
+# --- PREDICTION PIPELINE ---
 @torch.no_grad()
 def predict(image: Image.Image):
     image = image.convert("RGB")
@@ -56,15 +95,13 @@ def predict(image: Image.Image):
         # TURANT RAM CLEANUP
         del p1_model; gc.collect()
 
-        # Agar bimari nahi hai, toh HF ko call mat karo
         if p1_pred == 0:
             return {"prediction": "No_DR", "confidence": round(p1_conf * 100, 2)}
 
-        # --- PHASE 2 & 3 (REMOTE CALL TO HF SPACE) ---
         img_byte_arr = io.BytesIO()
         image.save(img_byte_arr, format='JPEG')
         
-        # VIP ENTRY: HF Space private ho ya limit ho, token bachayega
+        # VIP ENTRY TOKEN
         headers = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
         
         response = requests.post(

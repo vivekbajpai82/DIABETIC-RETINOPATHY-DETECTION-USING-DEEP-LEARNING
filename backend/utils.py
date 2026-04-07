@@ -17,10 +17,11 @@ transform_p1 = transforms.Compose([
 ])
 
 def load_phase1():
+    # ERROR FIXED: 'use_auth_token' replaced with 'token'
     model_path = hf_hub_download(
         repo_id=REPO_ID,
         filename="phase_1.pth",
-        use_auth_token=HF_TOKEN,
+        token=HF_TOKEN,
         cache_dir="models"
     )
     model = models.efficientnet_b3(weights=None)
@@ -48,7 +49,7 @@ def predict(image: Image.Image):
         if p1_pred == 0:
             return {"prediction": "No_DR", "confidence": round(p1_conf * 100, 2)}
 
-        # --- PHASE 2 & 3 (REMOTE) ---
+        # --- PHASE 2 & 3 (REMOTE CALL TO HF SPACE) ---
         img_byte_arr = io.BytesIO()
         image.save(img_byte_arr, format='JPEG')
         

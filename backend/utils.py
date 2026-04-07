@@ -5,100 +5,70 @@ from PIL import Image
 import io
 import os
 import gc
-import requests # Hugging Face API call karne ke liye
+import requests
+from huggingface_hub import hf_hub_download
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
-# Tumhare Hugging Face Space ka API endpoint
-HF_API_URL = "https://vivekbajpai82-dr-b5-engine.hf.space/predict_heavy"
+# --- CONFIG ---
+HF_TOKEN = os.getenv("HF_TOKEN")
+REPO_ID = "vivekbajpai82/dr-models" # Tera purana private repo
+HF_ENGINE_URL = "https://vivekbajpai82-dr-b5-engine.hf.space/predict_heavy"
 
-# Phase 1 local rahega (EfficientNet-B3 is light enough for Render)
-# B3 needs 300x300 input
+# Phase 1 local rahega (Render can handle one B3 model)
 transform_p1 = transforms.Compose([
     transforms.Resize((300, 300)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
-# compatibility for main.py (naming match)
-transform_phase1 = transform_p1
-transform_phase23 = transform_p1 # Dummy for main.py if needed
-
-# ==========================================
-# PHASE-1 LOADER (Local on Render)
-# ==========================================
 def load_phase1():
-    gc.collect()
+    # Phase 1 download logic (Keeping it same as you mentioned)
+    model_path = hf_hub_download(
+        repo_id=REPO_ID,
+        filename="phase_1.pth",
+        use_auth_token=HF_TOKEN,
+        cache_dir="models"
+    )
+    
     model = models.efficientnet_b3(weights=None)
     model.classifier[1] = nn.Linear(model.classifier[1].in_features, 2)
     
-    path = "models/phase_1.pth"
-    if os.path.exists(path):
-        state_dict = torch.load(path, map_location="cpu")
-        # Removing "module." or "model." prefixes if present
-        new_state_dict = {k.replace("module.", "").replace("model.", ""): v for k, v in state_dict.items()}
-        model.load_state_dict(new_state_dict, strict=False)
-        del state_dict
-    
+    state_dict = torch.load(model_path, map_location="cpu")
+    new_state_dict = {k.replace("module.", "").replace("model.", ""): v for k, v in state_dict.items()}
+    model.load_state_dict(new_state_dict, strict=False)
     model.eval()
     return model
 
-# ==========================================
-# MAIN PREDICTION LOGIC
-# ==========================================
 @torch.no_grad()
 def predict(image: Image.Image):
-    """
-    Step 1: Check Phase 1 locally on Render.
-    Step 2: If DR detected, call Hugging Face for Phase 2 & 3.
-    """
     image = image.convert("RGB")
-    
     try:
-        # --- EXECUTE PHASE 1 (LOCAL) ---
-        model = load_phase1()
+        # --- PHASE 1 (Local on Render) ---
+        p1_model = load_phase1()
         img_tensor = transform_p1(image).unsqueeze(0)
-        output = model(img_tensor)
+        out = p1_model(img_tensor)
+        p1_pred = torch.argmax(out, 1).item()
+        p1_conf = torch.softmax(out, 1)[0][p1_pred].item()
         
-        p1_pred = torch.argmax(output, 1).item()
-        p1_conf = torch.softmax(output, dim=1)[0][p1_pred].item()
-        
-        # Immediate cleanup to save Render RAM
-        del model, output
-        gc.collect()
+        del p1_model; gc.collect()
 
-        # If Class 0 (No_DR), return immediately
         if p1_pred == 0:
-            return {
-                "prediction": "No_DR", 
-                "confidence": round(p1_conf * 100, 2),
-                "engine": "Local-Phase1"
-            }
+            return {"prediction": "No_DR", "confidence": round(p1_conf * 100, 2)}
 
-        # --- EXECUTE PHASE 2 & 3 (REMOTE ON HUGGING FACE) ---
-        # DR detected! Now we need the heavy B5 models on HF.
-        
-        # 1. Convert PIL Image to Bytes
+        # --- PHASE 2 & 3 (API call to Hugging Face Space) ---
+        # No more downloading Phase 2/3! Directly calling the engine.
         img_byte_arr = io.BytesIO()
         image.save(img_byte_arr, format='JPEG')
         img_byte_arr = img_byte_arr.getvalue()
 
-        # 2. Send POST request to Hugging Face API
-        # Render RAM is safe here as it's just a network call
         response = requests.post(
-            HF_API_URL, 
-            files={"file": ("image.jpg", img_byte_arr, "image/jpeg")},
-            timeout=30 # 30 seconds timeout for safety
+            HF_ENGINE_URL, 
+            files={"file": ("image.jpg", img_byte_arr, "image/jpeg")}
         )
         
         if response.status_code == 200:
-            hf_result = response.json()
-            hf_result["engine"] = "HF-B5-Engine" # Traceability
-            return hf_result
+            return response.json()
         else:
-            return {"error": f"Hugging Face Engine Error: {response.status_code}"}
+            return {"error": f"HF Engine Error: {response.status_code}"}
 
     except Exception as e:
-        gc.collect()
-        return {"error": f"Backend Error: {str(e)}"}
+        return {"error": str(e)}

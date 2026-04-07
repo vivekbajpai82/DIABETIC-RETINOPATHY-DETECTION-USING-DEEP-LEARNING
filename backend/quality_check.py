@@ -19,7 +19,7 @@ def check_image_quality(image: Image.Image):
     # 1. RESOLUTION CHECK
     # ============================================
     height, width = img_array.shape[:2]
-    min_resolution = 224  # Minimum acceptable
+    min_resolution = 224
     recommended_resolution = 512
     
     if width < min_resolution or height < min_resolution:
@@ -32,7 +32,6 @@ def check_image_quality(image: Image.Image):
     # ============================================
     # 2. BRIGHTNESS CHECK
     # ============================================
-    # Convert to grayscale for brightness analysis
     gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
     brightness = np.mean(gray)
     
@@ -76,16 +75,10 @@ def check_image_quality(image: Image.Image):
     # ============================================
     # 5. COLOR DISTRIBUTION (Retinal Image Check)
     # ============================================
-    # Retinal images should have dominant red channel
-    red_channel = img_array[:, :, 0]
-    green_channel = img_array[:, :, 1]
-    blue_channel = img_array[:, :, 2]
+    red_mean   = np.mean(img_array[:, :, 0])
+    green_mean = np.mean(img_array[:, :, 1])
+    blue_mean  = np.mean(img_array[:, :, 2])
     
-    red_mean = np.mean(red_channel)
-    green_mean = np.mean(green_channel)
-    blue_mean = np.mean(blue_channel)
-    
-    # Typical retinal images have red > green > blue
     if red_mean < green_mean or red_mean < blue_mean:
         warnings.append("Color distribution unusual for retinal image. Ensure proper fundus camera settings.")
         score -= 15
@@ -99,34 +92,19 @@ def check_image_quality(image: Image.Image):
     if edge_density < 0.01:
         warnings.append("Very few image details detected. Check focus and lighting.")
         score -= 10
-    
+
     # ============================================
-    # 7. CIRCULAR FUNDUS CHECK (Advanced)
+    # NOTE: HoughCircles REMOVED ❌
+    # Yeh function Render free tier pe bahut slow tha
+    # aur infinite loading cause kar raha tha.
+    # Agar chahiye toh async task queue se karna hoga.
     # ============================================
-    # Retinal images typically have circular field of view
-    circles = cv2.HoughCircles(
-        gray,
-        cv2.HOUGH_GRADIENT,
-        dp=1,
-        minDist=100,
-        param1=50,
-        param2=30,
-        minRadius=50,
-        maxRadius=min(width, height) // 2
-    )
-    
-    if circles is None:
-        warnings.append("No circular fundus region detected. May not be a proper retinal image.")
-        score -= 15
-    
+
     # ============================================
     # FINAL DECISION
     # ============================================
-    
-    # Ensure score doesn't go negative
     score = max(0, score)
     
-    # Determine status
     if issues:
         status = "rejected"
         message = "Image quality insufficient for accurate analysis"
@@ -138,7 +116,7 @@ def check_image_quality(image: Image.Image):
         message = "Image quality good for analysis"
     
     return {
-        "status": status,  # "passed", "warning", "rejected"
+        "status": status,
         "quality_score": score,
         "message": message,
         "issues": issues,
@@ -161,7 +139,6 @@ def get_quality_recommendations(quality_result):
     if quality_result["status"] == "rejected":
         recommendations.append("🚫 Cannot proceed with analysis. Please address the following:")
         recommendations.extend([f"  • {issue}" for issue in quality_result["issues"]])
-        
         recommendations.append("\n📸 Tips for better image:")
         recommendations.append("  • Use proper fundus camera with adequate lighting")
         recommendations.append("  • Ensure patient's eye is properly dilated")
@@ -171,7 +148,6 @@ def get_quality_recommendations(quality_result):
     elif quality_result["status"] == "warning":
         recommendations.append("⚠️ Analysis will proceed but results may be less accurate:")
         recommendations.extend([f"  • {warning}" for warning in quality_result["warnings"]])
-        
         recommendations.append("\n💡 For better results:")
         recommendations.append("  • Retake image with improved lighting/focus if possible")
         recommendations.append("  • Verify results with a medical professional")

@@ -1,15 +1,12 @@
 [build]
- 
   base    = "frontend"
-  
-  
   publish = "dist"
-  
-  
   command = "npm run build"
 
+[build.environment]
+  VITE_API_URL = "https://diabetic-retinopathy-detection-backend-n4yg.onrender.com"
+
 [[redirects]]
-  
   from   = "/*"
   to     = "/index.html"
   status = 200

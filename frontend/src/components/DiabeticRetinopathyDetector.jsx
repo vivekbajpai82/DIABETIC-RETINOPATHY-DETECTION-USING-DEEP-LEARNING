@@ -15,9 +15,9 @@ import {
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
+// Ab sirf ek hi API endpoint ki zaroorat hai kyunki HF sab kuch ek saath de raha hai
 const API_URL = `${BASE_URL}/predict`;
 const QUALITY_CHECK_URL = `${BASE_URL}/check_quality`;
-const HEATMAP_URL = `${BASE_URL}/predict_with_heatmap`;
 
 const DiabeticRetinopathyDetector = () => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -31,6 +31,9 @@ const DiabeticRetinopathyDetector = () => {
   const [qualityChecking, setQualityChecking] = useState(false);
   const [heatmaps, setHeatmaps] = useState(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  
+  // Phase 3 Treatment ke liye naya state
+  const [treatment, setTreatment] = useState(null); 
   const fileInputRef = useRef(null);
 
   const getSeverityInfo = (pred) => {
@@ -82,7 +85,6 @@ const DiabeticRetinopathyDetector = () => {
       if (!response.ok) throw new Error("Quality check failed");
       const data = await response.json();
       console.log("Quality check response:", data);
-      // Backend returns {success, quality_check} 
       const qc = data.quality_check || data;
       setQualityCheck(qc);
       return qc;
@@ -107,6 +109,7 @@ const DiabeticRetinopathyDetector = () => {
     setError(null);
     setPrediction(null);
     setConfidence(null);
+    setTreatment(null);
     setHeatmaps(null);
     const reader = new FileReader();
     reader.onload = () => setPreview(reader.result);
@@ -120,12 +123,15 @@ const DiabeticRetinopathyDetector = () => {
     setError(null);
     setPrediction(null);
     setConfidence(null);
+    setTreatment(null);
+    setHeatmaps(null);
 
     const formData = new FormData();
     formData.append("file", selectedFile);
 
     try {
-      const endpoint = showHeatmap ? HEATMAP_URL : API_URL;
+      // Ab ek hi URL use hoga API ke liye
+      const endpoint = API_URL;
       console.log("Calling endpoint:", endpoint);
 
       const response = await fetch(endpoint, {
@@ -142,34 +148,46 @@ const DiabeticRetinopathyDetector = () => {
       const data = await response.json();
       console.log("Full API Response:", data);
 
-      // Handle failed prediction
-      if (data.success === false) {
+      if (data.error || data.success === false) {
         setError(data.error || "Prediction failed");
         if (data.quality_check) setQualityCheck(data.quality_check);
         return;
       }
 
-      // Set prediction - works even if success field missing
-      const pred = data.prediction;
-      const conf = data.confidence;
-
-      console.log("Prediction:", pred, "Confidence:", conf);
-
-      if (!pred) {
-        setError("No prediction received from server");
+      // --- NAYA API RESPONSE HANDLING LOGIC ---
+      if (!data.phase_1) {
+        setError("Invalid response format from server");
         return;
       }
 
-      setPrediction(pred);
-      setConfidence(conf);
+      // 1. Prediction aur Confidence set karna
+      if (data.phase_1.prediction === 'No_DR') {
+        setPrediction('No_DR');
+        setConfidence(data.phase_1.confidence);
+      } else if (data.phase_1.prediction === 'DR_Detected' && data.phase_2) {
+        // Frontend 'Proliferative' samajhta hai, backend 'Proliferate_DR' bhejta hai
+        const severity = data.phase_2.severity_class === 'Proliferate_DR' ? 'Proliferative' : data.phase_2.severity_class;
+        setPrediction(severity);
+        setConfidence(data.phase_2.confidence);
+      } else {
+        // Fallback agar sirf DR_Detected aaye par Phase 2 fail ho jaye
+        setPrediction('Moderate');
+        setConfidence(data.phase_1.confidence);
+      }
 
-      // Update quality check from predict response if available
+      // 2. Treatment Plan set karna
+      if (data.phase_3 && data.phase_3.treatment_plan) {
+        setTreatment(data.phase_3.treatment_plan);
+      }
+
+      // 3. Quality Check update
       if (data.quality_check) {
         setQualityCheck(data.quality_check);
       }
 
-      if (data.heatmaps) {
-        setHeatmaps(data.heatmaps);
+      // 4. Heatmap set karna (Direct Base64 String)
+      if (data.heatmap_base64) {
+        setHeatmaps(data.heatmap_base64);
       }
 
     } catch (err) {
@@ -185,6 +203,7 @@ const DiabeticRetinopathyDetector = () => {
     setPreview(null);
     setPrediction(null);
     setConfidence(null);
+    setTreatment(null);
     setError(null);
     setQualityCheck(null);
     setHeatmaps(null);
@@ -438,7 +457,7 @@ const DiabeticRetinopathyDetector = () => {
                   style={{ cursor: 'pointer' }}
                 />
                 <Eye size={18} />
-                Generate attention heatmap (shows where model is looking)
+                Show attention heatmap (where the AI is looking)
               </label>
             </div>
 
@@ -577,6 +596,21 @@ const DiabeticRetinopathyDetector = () => {
                   </div>
                 </div>
 
+                {/* Treatment Plan Display */}
+                {treatment && (
+                  <div style={{
+                    marginTop: '1rem',
+                    padding: '1rem',
+                    background: 'white',
+                    borderRadius: '0.75rem',
+                    border: '1px solid #e0e0e0',
+                    fontSize: '0.9rem',
+                    color: '#444'
+                  }}>
+                    <strong>Suggested Treatment:</strong> {treatment}
+                  </div>
+                )}
+
                 <div style={{ marginTop: '1.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                     <span style={{ fontWeight: '600', color: '#555' }}>Confidence Level</span>
@@ -615,45 +649,39 @@ const DiabeticRetinopathyDetector = () => {
               </div>
             )}
 
-            {/* Heatmap Visualization */}
-            {heatmaps && (
+            {/* Heatmap Visualization - Sirf tabhi dikhega jab checkbox TICK hoga */}
+            {showHeatmap && heatmaps && typeof heatmaps === 'string' && (
               <div style={{
                 marginTop: '2rem',
                 padding: '2rem',
                 background: 'white',
                 borderRadius: '1.25rem',
-                border: '2px solid #2196f3'
+                border: '2px solid #2196f3',
+                animation: 'fadeIn 0.5s ease'
               }}>
                 <h3 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.75rem',
                   marginBottom: '1.5rem',
-                  color: '#2196f3'
+                  color: '#2196f3',
+                  fontSize: '1.2rem'
                 }}>
                   <Eye size={24} /> Model Attention Heatmap
                 </h3>
-                {heatmaps.phase1 && heatmaps.phase1.success && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <h4 style={{ color: '#555', marginBottom: '0.75rem' }}>Phase 1: DR Detection</h4>
-                    <img src={heatmaps.phase1.comparison_base64} alt="Phase 1 Heatmap"
-                      style={{ width: '100%', borderRadius: '0.75rem', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                  </div>
-                )}
-                {heatmaps.phase2 && heatmaps.phase2.success && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <h4 style={{ color: '#555', marginBottom: '0.75rem' }}>Phase 2: Severity Classification</h4>
-                    <img src={heatmaps.phase2.comparison_base64} alt="Phase 2 Heatmap"
-                      style={{ width: '100%', borderRadius: '0.75rem', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                  </div>
-                )}
-                {heatmaps.phase3 && heatmaps.phase3.success && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <h4 style={{ color: '#555', marginBottom: '0.75rem' }}>Phase 3: Advanced Stage</h4>
-                    <img src={heatmaps.phase3.comparison_base64} alt="Phase 3 Heatmap"
-                      style={{ width: '100%', borderRadius: '0.75rem', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                  </div>
-                )}
+                
+                <img 
+                  src={`data:image/jpeg;base64,${heatmaps}`} 
+                  alt="Model Attention Heatmap"
+                  style={{ 
+                    width: '100%', 
+                    borderRadius: '0.75rem', 
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)' 
+                  }} 
+                />
+                <p style={{ marginTop: '1rem', fontSize: '0.85rem', color: '#666', textAlign: 'center' }}>
+                  The colored areas indicate regions the AI focused on to make its prediction.
+                </p>
               </div>
             )}
           </div>

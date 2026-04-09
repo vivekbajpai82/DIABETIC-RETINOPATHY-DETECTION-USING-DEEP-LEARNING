@@ -13,10 +13,10 @@ This project leverages deep learning and computer vision techniques to analyze r
 The application is structured with a modern API Gateway architecture, separating the client-facing frontend from the heavy machine learning inference backend, ensuring smooth performance even on cloud deployment platforms.
 
 ## 🛠️ Tech Stack
-* **Deep Learning / ML:** Python, TensorFlow/Keras (or PyTorch), OpenCV
-* **Backend API:** Node.js / Express (API Gateway)
+* **Deep Learning / ML:** Python, PyTorch, OpenCV
+* **Backend API:** FastApi
 * **Frontend:** React.js 
-* **Deployment:** Netlify (Frontend) & Render (Backend)
+* **Deployment:** Netlify (Frontend) & Render (Backend) 
 
 ## ✨ Key Features
 * **Accurate Detection:** Classifies retinal images into stages of Diabetic Retinopathy.
